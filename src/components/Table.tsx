@@ -1,13 +1,18 @@
+import { MantineProvider, createTheme } from "@mantine/core";
 import React, { useRef, useMemo, memo, useEffect } from "react";
 import { RevoGrid, type ColumnRegular, Template } from "@revolist/react-datagrid";
 import { CellDisplay } from "./CellDisplay";
 import { ColHeader } from "./ColHeader";
 
+const theme = createTheme({});
+
 const withAllProviders = (Component: React.ComponentType<any>) => {
   const WrappedComponent = memo((props: any) => (
-    <div data-provider-wrapper>
-      <Component {...props} />
-    </div>
+    <MantineProvider theme={theme} defaultColorScheme="light">
+      <div data-provider-wrapper>
+        <Component {...props} />
+      </div>
+    </MantineProvider>
   ));
   WrappedComponent.displayName = `WithAllProviders(${Component.displayName || Component.name || "Component"})`;
   return WrappedComponent;

@@ -5,6 +5,9 @@ import type {
 import React, { memo, useEffect } from "react";
 import CellText from "./CellText";
 import CellSelect from "./CellSelect";
+import CellBadge from "./CellBadge";
+import CellBoolean from "./CellBoolean";
+import CellNumber from "./CellNumber";
 enum FieldType {
   Text = "Text",
   LongText = "LongText",
@@ -65,10 +68,14 @@ export const CellDisplay = (
         Component = <CellText {...props} />;
       } else if (field.type === FieldType.Date) {
         Component = <CellText {...props} />;
+      } else if (
+        [FieldType.Number, FieldType.Float].includes(field.type as FieldType)
+      ) {
+        Component = <CellNumber {...props} />;
       } else if (field.type === FieldType.Badge) {
-        Component = <CellText {...props} />;
+        Component = <CellBadge {...props} />;
       } else if (field.type === FieldType.Boolean) {
-        Component = <CellText {...props} />;
+        Component = <CellBoolean {...props} />;
       } else if (field.type === FieldType.Progress) {
         Component = <CellText {...props} />;
       } else if (

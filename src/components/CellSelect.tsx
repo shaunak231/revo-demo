@@ -1,10 +1,15 @@
+import { ActionIcon, Popover, TextInput } from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
 import type {
   ColumnDataSchemaModel,
   ColumnTemplateProp,
 } from "@revolist/react-datagrid";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { twJoin } from "tailwind-merge";
+import { LuX } from "react-icons/lu";
 
+import { Badge } from "./Badge";
+import { BADGE_COLORS } from "../utils/badge-colors";
 import { saveCellValue } from "../hooks/table-events";
 import { useCellEditing } from "../hooks/cell-editor";
 
@@ -14,6 +19,23 @@ type CellSelectProps =
 
 function CellSelect(props: CellSelectProps) {
   const isMulti = !!(props as any).isMultiSelect;
+  const [opened, { open, close }] = useDisclosure(false);
+  const [inputValue, setInputValue] = useState("");
+  
+  const normalizeValue = (v: any): string[] => {
+    if (v == null) return [];
+    if (Array.isArray(v)) return v.map(String);
+    if (typeof v === "string") return v.split(",").map((s) => s.trim()).filter(Boolean);
+    return [String(v)];
+  };
+  
+  const [selectedOptions, setSelectedOptions] = useState<string[]>(
+    normalizeValue(props.value)
+  );
+  const targetRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
   const { isEditing, setIsEditing, readonly, handleMouseDown } =
     useCellEditing(props as any);
 
@@ -24,209 +46,292 @@ function CellSelect(props: CellSelectProps) {
       colIndex: props.colIndex,
       value: props.value,
       isEditing,
-      isMulti
+      isMulti,
+      opened
     });
   });
 
-  const selectedValues = useMemo(() => {
-    const v = props.value;
-    if (v == null) return [] as string[];
-    if (Array.isArray(v)) return v.map(String);
-    if (typeof v === "string") {
-      return v
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-    }
-    return [String(v)];
+  useEffect(() => {
+    const newValue = normalizeValue(props.value);
+    setSelectedOptions(newValue);
   }, [props.value]);
 
-  const [isOpen, setIsOpen] = useState(false);
-  const [position, setPosition] = useState<{
-    top: number;
-    left: number;
-    width: number;
-  } | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const PORTAL_EXPANSION_PX = 2;
-
-  const options = useMemo(() => {
-    const values = new Set<string>();
-    if (Array.isArray(props.data)) {
-      for (const row of props.data as any[]) {
-        const cellVal = row?.[props.column.columnName];
-        if (cellVal == null) continue;
-        if (Array.isArray(cellVal)) {
-          cellVal.forEach((v) => values.add(String(v)));
-        } else if (typeof cellVal === "string") {
-          values.add(cellVal);
-        } else {
-          values.add(String(cellVal));
-        }
+  const values: string[] = useMemo(() => {
+    const dataValues = (props.data || []).reduce((acc: string[], curr: any) => {
+      const value = curr?.[props.column.columnName];
+      if (value) {
+        const values = Array.isArray(value) ? value : [value];
+        values.forEach((v) => {
+          if (!acc.includes(String(v))) {
+            acc.push(String(v));
+          }
+        });
       }
-    }
-    selectedValues.forEach((v) => values.add(v));
-    return Array.from(values);
-  }, [props.data, props.column.columnName, selectedValues]);
+      return acc;
+    }, [] as string[]);
 
-  const label = useMemo(() => {
-    if (!selectedValues.length) return "";
-    return isMulti ? selectedValues.join(", ") : selectedValues[0];
-  }, [selectedValues, isMulti]);
+    const safeSelectedOptions = Array.isArray(selectedOptions) ? selectedOptions : [];
+    const combined = [...safeSelectedOptions, ...dataValues];
+    return [...new Set(combined)];
+  }, [props.data, props.column.columnName, selectedOptions]);
 
-  const openDropdown = useCallback(() => {
-    if (readonly || !containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    setPosition({
-      top: rect.bottom,
-      left: rect.left,
-      width: rect.width,
+  const itemColorMap = useMemo(() => {
+    const colorKeys = Object.keys(BADGE_COLORS);
+    const colorMap: Record<string, string> = {};
+
+    values.forEach((value, index) => {
+      colorMap[value] = colorKeys[index % colorKeys.length] as string;
     });
-    setIsEditing(true);
-    setIsOpen(true);
-  }, [readonly, setIsEditing]);
 
-  const closeDropdown = useCallback(() => {
-    setIsOpen(false);
-    setIsEditing(false);
-  }, [setIsEditing]);
+    return colorMap;
+  }, [values]);
 
-  const saveValue = useCallback(
-    (valuesToSave: string[]) => {
-      if (!containerRef.current) return;
-
-      const newValue = isMulti
-        ? valuesToSave
-        : valuesToSave.length
-        ? valuesToSave[0]
-        : null;
-
-      saveCellValue(props as any, containerRef, newValue);
-      closeDropdown();
+  const getItemColor = useCallback(
+    (item: string) => {
+      return itemColorMap[item] || "gray";
     },
-    [closeDropdown, isMulti, props]
+    [itemColorMap]
   );
 
-  const handleOptionClick = (option: string) => {
-    if (isMulti) {
-      const exists = selectedValues.includes(option);
-      const next = exists
-        ? selectedValues.filter((v) => v !== option)
-        : [...selectedValues, option];
-      saveValue(next);
-    } else {
-      saveValue([option]);
-    }
-  };
+  const options = useMemo(
+    () =>
+      values.filter((value) =>
+        value.toLowerCase().includes(inputValue.toLowerCase())
+      ),
+    [values, inputValue]
+  );
 
-  const handleClear = () => {
-    saveValue([]);
-  };
+  const handleOpen = useCallback(
+    (e?: React.MouseEvent) => {
+      if (readonly) return;
+      e?.stopPropagation();
+      setIsEditing(true);
+      open();
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 0);
+    },
+    [readonly, setIsEditing, open]
+  );
 
-  useEffect(() => {
-    if (!isOpen) return;
+  const handleClose = useCallback(() => {
+    close();
+    setIsEditing(false);
+    setInputValue("");
+  }, [close, setIsEditing]);
 
-    const handleKey = (e: KeyboardEvent) => {
+  const handleSave = useCallback(
+    (value: string) => {
+      if (!value.trim()) {
+        handleClose();
+        return;
+      }
+
+      const currentOptions = Array.isArray(selectedOptions) ? selectedOptions : [];
+      let newValue: string[];
+
+      if (isMulti) {
+        if (currentOptions.includes(value)) {
+          handleClose();
+          return;
+        }
+        newValue = [...currentOptions, value];
+      } else {
+        newValue = [value];
+      }
+
+      if (saveCellValue(props as any, targetRef, isMulti ? newValue : newValue[0])) {
+        setSelectedOptions(newValue);
+      }
+
+      handleClose();
+    },
+    [props, selectedOptions, handleClose, isMulti]
+  );
+
+  const handleDeleteOption = useCallback(
+    (optionToDelete: string) => {
+      const currentOptions = Array.isArray(selectedOptions) ? selectedOptions : [];
+      const newSelectedOptions = currentOptions.filter(
+        (option) => option !== optionToDelete
+      );
+      setSelectedOptions(newSelectedOptions);
+
+      const newValue = isMulti ? newSelectedOptions : (newSelectedOptions[0] || null);
+      saveCellValue(props as any, targetRef, newValue);
+    },
+    [props, selectedOptions, isMulti]
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (!isEditing) return;
+
+      e.stopPropagation();
+
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (inputValue.trim()) {
+          handleSave(inputValue);
+        }
+        return;
+      }
+
       if (e.key === "Escape") {
         e.preventDefault();
-        closeDropdown();
+        handleClose();
+        return;
       }
-    };
+    },
+    [isEditing, inputValue, handleSave, handleClose]
+  );
 
-    const handleClick = (e: MouseEvent) => {
-      if (!containerRef.current) return;
-      if (!containerRef.current.contains(e.target as Node)) {
-        closeDropdown();
+  const handleCellClick = useCallback(
+    (e: React.MouseEvent) => {
+      if ((e.target as HTMLElement).closest("button")) {
+        return;
       }
-    };
-
-    window.addEventListener("keydown", handleKey);
-    window.addEventListener("mousedown", handleClick);
-    return () => {
-      window.removeEventListener("keydown", handleKey);
-      window.removeEventListener("mousedown", handleClick);
-    };
-  }, [isOpen, closeDropdown]);
+      handleOpen(e);
+    },
+    [handleOpen]
+  );
 
   return (
-    <>
-      <div
-        ref={containerRef}
-        className="relative size-full min-h-[36px] w-full max-w-full overflow-hidden cursor-pointer"
-        onClick={() => !readonly && openDropdown()}
-        tabIndex={0}
-        data-rgcol={(props as any).colIndex}
-        data-rgrow={(props as any).rowIndex}
-        onMouseDown={handleMouseDown}
+    <div
+      ref={targetRef}
+      className="size-full cursor-pointer"
+      onMouseDown={handleMouseDown}
+      onClick={handleCellClick}
+    >
+      <Popover
+        opened={opened}
+        width={260}
+        position="bottom-start"
+        offset={4}
+        radius="sm"
+        onDismiss={handleClose}
       >
-        <div className="h-full w-full max-w-full px-3 text-xs font-medium overflow-hidden flex items-center">
-          {label || <span className="text-stone-400">Select…</span>}
-        </div>
-      </div>
-
-      {isOpen &&
-        position &&
-        createPortal(
+        <Popover.Target>
           <div
-            className="fixed z-[10000] bg-white border border-stone-300 rounded shadow-sm text-xs"
-            style={{
-              top: position.top + PORTAL_EXPANSION_PX,
-              left: position.left - PORTAL_EXPANSION_PX,
-              minWidth: position.width + PORTAL_EXPANSION_PX * 2,
-              maxWidth: position.width + PORTAL_EXPANSION_PX * 2,
-            }}
-            onClick={(e) => e.stopPropagation()}
+            ref={contentRef}
+            className={twJoin(
+              "flex flex-wrap items-start gap-1.5 px-3 pb-1.5 w-full min-h-[36px] h-full",
+              selectedOptions.length > 0 ? "pt-[7px]" : "pt-[7px]"
+            )}
           >
-            <div className="max-h-64 overflow-auto">
-              {options.length === 0 && (
-                <div className="px-3 py-2 text-stone-500">
-                  No options (add values in this column to see them here)
-                </div>
-              )}
-              {options.map((option) => {
-                const selected = selectedValues.includes(option);
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    className={`flex w-full items-center px-3 py-1.5 text-left hover:bg-stone-100 ${
-                      selected ? "bg-stone-100 font-semibold" : ""
-                    }`}
-                    onClick={() => handleOptionClick(option)}
+            {!Array.isArray(selectedOptions) || selectedOptions.length === 0 ? (
+              <span className="text-stone-400 text-xs">Select…</span>
+            ) : (
+              selectedOptions.slice(0, 3).map((selectedOption, index) => (
+                <div key={`${selectedOption}-${index}`} className="relative">
+                  <Badge
+                    color={getItemColor(selectedOption)}
+                    variant="filled"
+                    radius="sm"
                   >
-                    {isMulti && (
-                      <span className="mr-2 text-[10px]">
-                        {selected ? "☑" : "☐"}
-                      </span>
-                    )}
-                    <span>{option}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex justify-between border-t border-stone-200 px-3 py-1.5">
-              <button
-                type="button"
-                className="text-[11px] text-stone-500 hover:text-stone-800"
-                onClick={handleClear}
-              >
-                Clear
-              </button>
-              <button
-                type="button"
-                className="text-[11px] text-stone-500 hover:text-stone-800"
-                onClick={closeDropdown}
-              >
-                Close
-              </button>
-            </div>
-          </div>,
-          document.body
-        )}
-    </>
+                    {selectedOption}
+                  </Badge>
+                </div>
+              ))
+            )}
+            {Array.isArray(selectedOptions) && selectedOptions.length > 3 && (
+              <span className="text-[11px] text-stone-500">
+                … +{selectedOptions.length - 3} more
+              </span>
+            )}
+          </div>
+        </Popover.Target>
+        <Popover.Dropdown className="ml-[-9px]">
+          <div className="flex size-full flex-wrap items-center gap-x-2 gap-y-1 px-1">
+            {Array.isArray(selectedOptions) && selectedOptions.map((selectedOption, index) => (
+              <div key={`${selectedOption}-${index}`} className="relative">
+                <Badge
+                  color={getItemColor(selectedOption)}
+                  variant="filled"
+                  radius="sm"
+                  rightSection={
+                    <ActionIcon
+                      className="size-3 border-none p-0"
+                      variant="transparent"
+                      size="xs"
+                      color="red"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteOption(selectedOption);
+                      }}
+                      title="Remove option"
+                    >
+                      <LuX size={12} />
+                    </ActionIcon>
+                  }
+                >
+                  {selectedOption}
+                </Badge>
+              </div>
+            ))}
+            {isEditing && (
+              <TextInput
+                ref={inputRef}
+                className="min-w-1 flex-1"
+                classNames={{
+                  input: "text-[13px]",
+                }}
+                variant="unstyled"
+                size="xs"
+                value={inputValue}
+                onKeyDown={handleKeyDown}
+                onFocus={() => !readonly && setIsEditing(true)}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setInputValue(e.target.value)}
+                styles={{
+                  input: {
+                    fontWeight: 500,
+                    pointerEvents: "auto",
+                    userSelect: "text",
+                    cursor: isEditing ? "text" : "default",
+                    caretColor: isEditing ? "auto" : "transparent",
+                  },
+                  wrapper: {
+                    tabIndex: 0,
+                  },
+                }}
+                readOnly={!isEditing}
+              />
+            )}
+          </div>
+          <div className="max-h-[120px] overflow-y-auto">
+            {options.length > 0
+              ? options.map((option, index) => (
+                  <div
+                    key={`${option}-${index}`}
+                    className="flex cursor-pointer rounded-md px-2 py-1 hover:bg-stone-100"
+                    onClick={() => handleSave(option)}
+                  >
+                    <Badge
+                      color={getItemColor(option)}
+                      variant="filled"
+                      radius="sm"
+                    >
+                      {option}
+                    </Badge>
+                  </div>
+                ))
+              : inputValue.trim().length > 0 && (
+                  <div
+                    className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 hover:bg-stone-100"
+                    onClick={() => handleSave(inputValue)}
+                  >
+                    <div className="text-xs">Create</div>
+                    <Badge color="gray" variant="filled" radius="sm">
+                      {inputValue}
+                    </Badge>
+                  </div>
+                )}
+          </div>
+        </Popover.Dropdown>
+      </Popover>
+    </div>
   );
 }
 
 export default CellSelect;
-
-

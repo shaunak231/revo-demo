@@ -17,6 +17,10 @@ function App() {
           "status",
           "tags",
           "description",
+          "price",
+          "quantity",
+          "category",
+          "priority",
         ]}
         sqlSchema={mockSqlSchema}
         readonly={false}
